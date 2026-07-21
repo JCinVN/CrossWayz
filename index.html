@@ -3178,10 +3178,17 @@
                 return;
             }
             const delta = -2 * currentTotal;
-            p.turnScore[r] = (p.turnScore[r] || 0) + delta;
+            // Flip whichever field actually holds this round's score — a Team
+            // Work Round's share lives in teamWorkAdj, not turnScore, so
+            // burning it must flip THAT field. Otherwise the delta would land
+            // in a brand-new (previously empty) turnScore slot, leaving the
+            // real teamWorkAdj number untouched and displayed side-by-side —
+            // mathematically fine for the total, but confusing to read.
+            const field = (p.teamWorkAdj[r] !== undefined) ? 'teamWorkAdj' : 'turnScore';
+            p[field][r] = (p[field][r] || 0) + delta;
             recalculateTotals();
-            burnLog.push({ playerIdx: targetIdx, round: r });
-            appliedBurn = { targetIdx, round: r, delta };
+            burnLog.push({ playerIdx: targetIdx, round: r, field });
+            appliedBurn = { targetIdx, round: r, delta, field };
             specialActionsState.burn = true;
             showToast(`🔥 Burned ${p.name}'s Turn → ${getRoundTotal(p, r)} pts (Round ${r + 1})`);
             updateUI();
@@ -3189,8 +3196,9 @@
 
         function undoBurn() {
             if (!specialActionsState.burn || !appliedBurn) return;
-            const { targetIdx, round, delta } = appliedBurn;
-            players[targetIdx].turnScore[round] -= delta;
+            const { targetIdx, round, delta, field } = appliedBurn;
+            const burnField = field || 'turnScore'; // old saved games may predate this field
+            players[targetIdx][burnField][round] -= delta;
             recalculateTotals();
             const idx = burnLog.findIndex(b => b.playerIdx === targetIdx && b.round === round);
             if (idx > -1) burnLog.splice(idx, 1);
@@ -3508,10 +3516,14 @@
                     html += `<tr><td>R${r + 1}</td>`;
                     players.forEach((p, idx) => {
                         const parts = [];
+                        const burnEntry = burnLog.find(b => b.playerIdx === idx && b.round === r);
                         const hasNormal = p.turnScore[r] !== undefined || p.challengeAdj[r] !== undefined;
                         if (hasNormal) {
-                            const wasBurned = burnLog.some(b => b.playerIdx === idx && b.round === r);
-                            parts.push(`${wasBurned ? '🔥 ' : ''}${getRoundOwnPlay(p, r)}`);
+                            // Old saved games predate the `field` tag on burnLog
+                            // entries — default those to "turnScore" so they
+                            // still render the fire icon where they used to.
+                            const burnedHere = burnEntry && (burnEntry.field || 'turnScore') === 'turnScore';
+                            parts.push(`${burnedHere ? '🔥 ' : ''}${getRoundOwnPlay(p, r)}`);
                         }
                         const twVal = p.teamWorkAdj[r];
                         if (twVal !== undefined) {
@@ -3522,7 +3534,8 @@
                             const twEntry = teamWorkLog.find(t => t.assignedRounds && t.assignedRounds[idx] === r);
                             const leaderIdx = twEntry ? twEntry.leaderIdx : null;
                             const tag = idx === leaderIdx ? ' (Leader)' : '';
-                            parts.push(`<span style="color: var(--accent-glow);">🤝${twVal}${tag}</span>`);
+                            const burnedHere = burnEntry && burnEntry.field === 'teamWorkAdj';
+                            parts.push(`<span style="color: var(--accent-glow);">${burnedHere ? '🔥 ' : ''}🤝${twVal}${tag}</span>`);
                         }
                         html += `<td>${parts.length ? parts.join(' + ') : '-'}</td>`;
                     });
