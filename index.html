@@ -216,6 +216,65 @@
             font-weight: 700;
             color: var(--accent-glow);
         }
+        /* Game Style edge bar — a thin strip fixed to the left edge of the
+           viewport for the whole game screen, so the active style is always
+           visible no matter how far the page is scrolled. Color is driven by
+           body.mode-quick / body.mode-lite; the default (no class) is
+           Standard. Hidden outside of active gameplay. */
+        #style-edge-bar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            z-index: 900;
+            pointer-events: none;
+            background: linear-gradient(180deg, #8b5cf6, #60a5fa); /* Standard */
+            display: none;
+        }
+        body.game-active #style-edge-bar {
+            display: block;
+        }
+        body.mode-quick #style-edge-bar {
+            background: linear-gradient(180deg, #f59e0b, #fbbf24); /* Express */
+        }
+        body.mode-lite #style-edge-bar {
+            background: linear-gradient(180deg, #8ee83a, #22c1f0); /* Lite */
+        }
+        /* Game Style badge inside the sticky name bar */
+        #sticky-style-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.68rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            background: rgba(148, 163, 184, 0.08);
+            white-space: nowrap;
+        }
+        #sticky-style-badge img {
+            width: 12px;
+            height: 12px;
+            display: block;
+        }
+        body.mode-quick #sticky-style-badge {
+            color: #f59e0b;
+            border-color: rgba(245, 158, 11, 0.4);
+            background: rgba(245, 158, 11, 0.12);
+        }
+        body.mode-lite #sticky-style-badge {
+            color: #5fe0c8;
+            border-color: rgba(34, 193, 240, 0.4);
+            background: rgba(34, 193, 240, 0.12);
+        }
+        body:not(.mode-quick):not(.mode-lite) #sticky-style-badge {
+            color: #a78bfa;
+            border-color: rgba(139, 92, 246, 0.4);
+            background: rgba(139, 92, 246, 0.12);
+        }
         /* Timer */
         #timer-panel {
             background-color: var(--card-bg);
@@ -1385,6 +1444,7 @@
     </style>
 </head>
 <body>
+    <div id="style-edge-bar"></div>
     <div id="page-flash-overlay"></div>
     <div id="toast-container"></div>
     <div id="seven-card-modal" class="modal-overlay" style="display:none;">
@@ -1516,6 +1576,18 @@
                 </div>
             </div>
 
+            <div class="form-group">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <label style="margin-bottom:0;">🗂 Past Games (this device)</label>
+                    <span id="game-history-toggle-setup" style="font-size:0.75rem; color:var(--primary); cursor:pointer;" onclick="toggleGameHistory('-setup')">▼ Show</span>
+                </div>
+                <div id="game-history-container-setup" style="display:none; margin-top:8px;">
+                    <div id="game-history-list-setup"></div>
+                    <button class="btn btn-secondary" style="width:auto; padding:8px 14px; font-size:0.8rem; margin-top:10px;" onclick="copyLastGameLog()">Copy Last Game Log (JSON)</button>
+                    <button class="btn btn-secondary" style="width:auto; padding:8px 14px; font-size:0.8rem; margin-top:10px;" onclick="clearGameHistory()">Clear History</button>
+                </div>
+            </div>
+
             <button class="btn" onclick="startGame()">Start Game</button>
         </div>
 
@@ -1524,6 +1596,7 @@
             <!-- Sticky player name (always visible while scrolling) -->
             <div id="sticky-name-bar" style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
                 <span id="sticky-name-text">Round 1 · Player</span>
+                <span id="sticky-style-badge"><span>🎯</span> Standard</span>
                 <span id="elapsed-time-display" style="display:none; font-size:0.82rem; font-weight:700; color:var(--accent-glow);">⏳ 00:00</span>
             </div>
 
@@ -1779,6 +1852,7 @@
                 </div>
                 <div id="game-history-container" style="display:none;">
                     <div id="game-history-list"></div>
+                    <button class="btn btn-secondary" style="width:auto; padding:8px 14px; font-size:0.8rem; margin-top:10px;" onclick="copyLastGameLog()">Copy Last Game Log (JSON)</button>
                     <button class="btn btn-secondary" style="width:auto; padding:8px 14px; font-size:0.8rem; margin-top:10px;" onclick="clearGameHistory()">Clear History</button>
                 </div>
             </div>
@@ -1932,6 +2006,17 @@
         let draftHistory = []; // { value, label }
         let draftWords = [];   // numbers only, this turn's confirmed Words
         let wordScoreLog = []; // { playerIdx, round, value } — permanent, for "highest word" stat
+
+        // ---- Full action log (for post-game strategy analysis) ----
+        // Every meaningful game action, in the order it happened, kept for the
+        // whole game (unlike the per-Turn draft state, which is wiped each
+        // Turn). Exported as JSON with the end-of-game Google Form submission.
+        // Player references are stored as indexes here and resolved to names
+        // at export time, so mid-game renames can't desync the log.
+        let gameEventLog = [];
+        // Per-Turn scratch that feeds one `turn` event at Submit time:
+        let draftWordDetails = []; // { value, letters, cards: [{score, letters}] } per Word committed
+        let draftBonusInfo = null; // { op, layer, value } — the one Bonus allowed per Turn
         let selectedCount = 4;
 
         let challengeAIdx = 0;
@@ -2025,11 +2110,27 @@
 
         // Sets the body class that drives .quick-hide / .bonus-hide CSS —
         // Express hides both, Lite hides only .quick-hide (keeps Bonus +
-        // T-PAIR), Standard hides neither.
+        // T-PAIR), Standard hides neither. Also drives the left-edge style
+        // bar + the sticky-bar style badge so the active Game Style stays
+        // visible throughout gameplay, not just at Setup.
         function applyModeBodyClass() {
             document.body.classList.remove('mode-quick', 'mode-lite');
             if (gameMode === 'quick') document.body.classList.add('mode-quick');
             else if (gameMode === 'lite') document.body.classList.add('mode-lite');
+            document.body.classList.add('game-active');
+            updateStyleBadge();
+        }
+
+        const GAME_STYLE_ICONS = {
+            quick: '<span>⚡️</span> Express',
+            lite: '<img src="data:image/png;base64,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" alt=""> Lite',
+            full: '<span>🎯</span> Standard'
+        };
+
+        function updateStyleBadge() {
+            const badge = document.getElementById('sticky-style-badge');
+            if (!badge) return;
+            badge.innerHTML = GAME_STYLE_ICONS[gameMode] || GAME_STYLE_ICONS.full;
         }
 
         let maxRoundLimit = null; // null = no limit
@@ -2116,7 +2217,8 @@
                 wagerSessionCounter, wagerSessionLog,
                 gameMode,
                 maxRoundLimit, roundLimitWarned, roundLimitReachedPrompted,
-                lastSettledPlayerIdx, lastSettledRound, teamWorkLog
+                lastSettledPlayerIdx, lastSettledRound, teamWorkLog,
+                gameEventLog
             };
         }
 
@@ -2168,6 +2270,7 @@
             lastSettledPlayerIdx = (state.lastSettledPlayerIdx !== undefined) ? state.lastSettledPlayerIdx : null;
             lastSettledRound = (state.lastSettledRound !== undefined) ? state.lastSettledRound : null;
             teamWorkLog = state.teamWorkLog || [];
+            gameEventLog = state.gameEventLog || [];
 
             renderPresetGrid();
             renderExtraPresetList();
@@ -2463,6 +2566,7 @@
             lastSettledPlayerIdx = null;
             lastSettledRound = null;
             teamWorkLog = [];
+            gameEventLog = [];
             wentOutPlayerIdx = -1;
             gameSettled = false;
 
@@ -2937,9 +3041,20 @@
                 return sum + (mapped !== undefined ? mapped : 1);
             }, 0);
 
+            // Card-by-card breakdown for the analysis log — captured before
+            // stagedTapStack is cleared below. Wild cards are recorded as
+            // score 0 with their W1/W2/W3 letter count, matching how they're
+            // actually scored and counted.
+            const wordCards = stagedTapStack.map(t => ({
+                score: t.wild ? 0 : t.value,
+                letters: t.wild ? (t.letters || 1) : (letterCountMap[t.value] !== undefined ? letterCountMap[t.value] : 1),
+                wild: !!t.wild
+            }));
+
             addValue(finalVal);
             draftWords.push(finalVal);
             wordScoreLog.push({ playerIdx: activePlayerIndex, round: currentRound - 1, value: finalVal });
+            draftWordDetails.push({ value: finalVal, letters: wordLetterCount, cards: wordCards });
 
             // Feed the turn-long Letter log (excludes Wild, which is always 0
             // and would otherwise get auto-picked as the "lowest" for TAX) —
@@ -3025,6 +3140,8 @@
             stagedTapStack = [];
             turnLetterLog = [];
             turnTPairReasons = [];
+            draftWordDetails = [];
+            draftBonusInfo = null;
             const customInput = document.getElementById('custom-score-input');
             if (customInput) customInput.value = '';
             hideBonusPickers();
@@ -3220,6 +3337,7 @@
             }
             const labelSuffix = layerLabel ? ` ${layerLabel}` : '';
             bonusEntry = addValue(delta, `${delta >= 0 ? '+' : ''}${delta} (${opLabel}${labelSuffix})`);
+            draftBonusInfo = { op: opLabel, layer: layerLabel || null, value: delta };
             specialActionsState.bonus = true;
             bonusPendingOp = null;
             hideBonusPickers();
@@ -3241,6 +3359,7 @@
         function applyBonusAmount(amount) {
             if (!amount || amount <= 0) return;
             bonusEntry = addValue(amount, `+${amount} (FLAT)`);
+            draftBonusInfo = { op: 'FLAT', layer: null, value: amount };
             specialActionsState.bonus = true;
             bonusPendingOp = null;
             hideBonusPickers();
@@ -3297,6 +3416,7 @@
             const idx = draftHistory.indexOf(bonusEntry);
             if (idx > -1) draftHistory.splice(idx, 1);
             bonusEntry = null;
+            draftBonusInfo = null;
             specialActionsState.bonus = false;
             updateSpecialButtonsUI();
             updateDraftDisplay();
@@ -3359,6 +3479,14 @@
             recalculateTotals();
 
             appliedChallenge = { aIdx, bIdx, winner, round: rIndex, hcUsed: useHC };
+            // Logged from the challenger's (B's) point of view: B is the one
+            // who chose to challenge, so `result` describes B's outcome.
+            gameEventLog.push({
+                r: rIndex, p: bIdx, t: 'challenge',
+                opponent: aIdx,
+                result: winner === 'B' ? 'win' : 'lose',
+                hcUsed: useHC
+            });
             specialActionsState.challenge = true;
             showToast(useHC
                 ? `Challenge: ${players[winIdx].name} +10 / ${aPlayer.name} protected by Handicap`
@@ -3400,6 +3528,8 @@
             } else {
                 players[loseIdx].challengeAdj[round] += 10;
             }
+            const li = gameEventLog.findIndex(e => e.t === 'challenge' && e.r === round && e.p === bIdx && e.opponent === aIdx);
+            if (li > -1) gameEventLog.splice(li, 1);
             recalculateTotals();
 
             if (reasonText) {
@@ -3490,6 +3620,7 @@
             recalculateTotals();
             burnLog.push({ playerIdx: targetIdx, round: r, field });
             appliedBurn = { targetIdx, round: r, delta, field };
+            gameEventLog.push({ r, p: activePlayerIndex, t: 'burn', target: targetIdx, value: delta });
             specialActionsState.burn = true;
             showToast(`🔥 Burned ${p.name}'s Turn → ${getRoundTotal(p, r)} pts (Round ${r + 1})`);
             updateUI();
@@ -3503,6 +3634,8 @@
             recalculateTotals();
             const idx = burnLog.findIndex(b => b.playerIdx === targetIdx && b.round === round);
             if (idx > -1) burnLog.splice(idx, 1);
+            const li = gameEventLog.findIndex(e => e.t === 'burn' && e.r === round && e.target === targetIdx);
+            if (li > -1) gameEventLog.splice(li, 1);
             specialActionsState.burn = false;
             appliedBurn = null;
             updateUI();
@@ -3569,11 +3702,17 @@
                 lastSettledPlayerIdx = playerIdx;
                 lastSettledRound = roundIdx;
                 clearDraft();
+                // Exchanging IS this player's whole Turn (no Words played), so
+                // it's logged as a Turn with the exchange flag instead of a
+                // separate event type.
+                gameEventLog.push({ r: roundIdx, p: playerIdx, t: 'turn', exchange: true });
                 showToast('Exchanged → 0 pts', () => {
                     const pl = players[playerIdx];
                     pl.exchangesUsed = Math.max(0, pl.exchangesUsed - 1);
                     if (pl.lastExchangeRound === roundIdx + 1) pl.lastExchangeRound = null;
                     pl.turnScore[roundIdx] = undefined;
+                    const li = gameEventLog.findIndex(e => e.t === 'turn' && e.exchange && e.r === roundIdx && e.p === playerIdx);
+                    if (li > -1) gameEventLog.splice(li, 1);
                     recalculateTotals();
                     updateUI();
                 });
@@ -3595,6 +3734,26 @@
                 curPlayer.turnScore[rIndex] = (curPlayer.turnScore[rIndex] || 0) + submittedScore;
             }
             recalculateTotals();
+
+            // One `turn` event per submitted Turn, carrying the whole
+            // Card → Word → Turn hierarchy plus whatever else was used this
+            // Turn. Re-submitting an edited Turn replaces its earlier entry
+            // rather than logging the same Turn twice.
+            const turnEvent = {
+                r: rIndex,
+                p: activePlayerIndex,
+                t: 'turn',
+                words: draftWordDetails,
+                lookup: specialActionsState.lookup,
+                bonus: draftBonusInfo,
+                perfectTurn: specialActionsState.perfectTurn,
+                tpairReasons: [...turnTPairReasons],
+                total: submittedScore
+            };
+            const existingIdx = gameEventLog.findIndex(e => e.t === 'turn' && e.r === rIndex && e.p === activePlayerIndex);
+            if (existingIdx > -1) gameEventLog[existingIdx] = turnEvent;
+            else gameEventLog.push(turnEvent);
+
             lastSettledPlayerIdx = activePlayerIndex;
             lastSettledRound = rIndex;
             const sign = submittedScore >= 0 ? '+' : '';
@@ -4046,6 +4205,20 @@
             });
             recalculateTotals();
             teamWorkLog.push({ round: triggerRound, leaderIdx: twLeaderIdx, total, playedIdxs, assignedRounds });
+            // Logged against the trigger round only. Which round each player's
+            // share technically got *stored* in (assignedRounds) is an internal
+            // bookkeeping detail with no strategic meaning, so it stays out of
+            // the analysis log — but each player's actual share does not.
+            gameEventLog.push({
+                r: triggerRound, t: 'teamwork',
+                leader: twLeaderIdx,
+                total,
+                active: [...playedIdxs],
+                shares: players.reduce((acc, p, idx) => {
+                    acc[idx] = p.teamWorkAdj[assignedRounds[idx]] || 0;
+                    return acc;
+                }, {})
+            });
             lastSettledPlayerIdx = twLeaderIdx;
             lastSettledRound = assignedRounds[twLeaderIdx];
 
@@ -4232,6 +4405,11 @@
             if (currentWagerSession) {
                 currentWagerSession.winnerIdx = winnerIdx;
                 currentWagerSession.confirmed = true;
+                gameEventLog.push({
+                    r: currentWagerSession.round, t: 'wager',
+                    winner: winnerIdx,
+                    deltas: { ...currentWagerSession.deltas }
+                });
             }
             const sessionId = currentWagerSession ? currentWagerSession.id : wagerSessionCounter;
             currentWagerSession = null;
@@ -4266,6 +4444,20 @@
             // Details) know where to look.
             wentOutPlayerIdx = wentOutIdx;
             gameSettled = true;
+
+            // Re-confirming settlement replaces the earlier entry rather than
+            // stacking a second one.
+            const settlementEvent = {
+                t: 'settlement',
+                wentOut: wentOutIdx >= 0 ? wentOutIdx : null,
+                handPoints: players.reduce((acc, p, idx) => {
+                    acc[idx] = -(p.settlementHandPoints || 0);
+                    return acc;
+                }, {})
+            };
+            const si = gameEventLog.findIndex(e => e.t === 'settlement');
+            if (si > -1) gameEventLog[si] = settlementEvent;
+            else gameEventLog.push(settlementEvent);
 
             clearInterval(gameTimerInterval);
             clearInterval(turnTimerInterval);
@@ -4376,7 +4568,7 @@
         function startNewGameFromResults() {
             clearSavedState();
             stopElapsedTimeDisplay();
-            document.body.classList.remove('mode-quick', 'mode-lite');
+            document.body.classList.remove('mode-quick', 'mode-lite', 'game-active');
             document.getElementById('results-screen').style.display = 'none';
             document.getElementById('setup-screen').style.display = 'block';
         }
@@ -4463,7 +4655,10 @@
             rank6Name: '1049885641', rank6Score: '911410865',
             wentOut: '610614160',
             highestTurnScore: '1469976466', highestTurnPlayer: '775759188',
-            highestWordScore: '927751391', highestWordPlayer: '849050874'
+            highestWordScore: '927751391', highestWordPlayer: '849050874',
+            // Full action log (JSON) — must be a *Paragraph* question on the
+            // form; Short answer has a length cap this would blow past.
+            gameLog: '1327511772'
         };
         const GOOGLE_QUEUE_KEY = 'crosswayz_google_queue_v1';
         const GOOGLE_QUEUE_MAX = 20; // bounded so a long offline stretch can't grow this forever
@@ -4471,7 +4666,7 @@
         // Builds the exact { entryId: value } pairs for one game — kept
         // separate from the queue/sending mechanics so the field mapping is
         // easy to re-check against the form on its own.
-        function buildGoogleFormPayload(entry, highestTurn, highestWord) {
+        function buildGoogleFormPayload(entry, highestTurn, highestWord, gameLogJson) {
             const e = GOOGLE_FORM_ENTRIES;
             const dateStr = new Date(entry.date).toLocaleDateString('en-CA'); // YYYY-MM-DD, unambiguous
             const payload = {
@@ -4489,7 +4684,83 @@
             payload[e.highestTurnPlayer] = highestTurn ? players[highestTurn.playerIdx].name : '';
             payload[e.highestWordScore] = highestWord ? String(highestWord.value) : '';
             payload[e.highestWordPlayer] = highestWord ? players[highestWord.playerIdx].name : '';
+            if (e.gameLog && gameLogJson) payload[e.gameLog] = gameLogJson;
             return payload;
+        }
+
+        // Turns the raw event log into the self-contained JSON string that
+        // ships with the end-of-game submission. Player indexes are resolved
+        // to names here (and only here) so the exported file stands alone —
+        // no lookup table needed to read it months later.
+        function buildGameLogJson(entry, highestTurn, highestWord) {
+            const name = idx => (players[idx] ? players[idx].name : null);
+            const mapKeysToNames = obj => Object.keys(obj || {}).reduce((acc, k) => {
+                const n = name(parseInt(k));
+                if (n) acc[n] = obj[k];
+                return acc;
+            }, {});
+
+            const events = gameEventLog.map(e => {
+                const out = { t: e.t };
+                if (e.r !== undefined) out.r = e.r + 1; // 1-based to match what players see
+                if (e.p !== undefined) out.p = name(e.p);
+                switch (e.t) {
+                    case 'turn':
+                        if (e.exchange) { out.exchange = true; break; }
+                        out.words = e.words;
+                        out.lookup = e.lookup;
+                        out.bonus = e.bonus;
+                        out.perfectTurn = e.perfectTurn;
+                        out.tpairReasons = e.tpairReasons;
+                        out.total = e.total;
+                        break;
+                    case 'challenge':
+                        out.opponent = name(e.opponent);
+                        out.result = e.result;
+                        out.hcUsed = e.hcUsed;
+                        break;
+                    case 'burn':
+                        out.target = name(e.target);
+                        out.value = e.value;
+                        break;
+                    case 'wager':
+                        out.winner = name(e.winner);
+                        out.deltas = mapKeysToNames(e.deltas);
+                        break;
+                    case 'teamwork': {
+                        out.leader = name(e.leader);
+                        out.total = e.total;
+                        out.active = (e.active || []).map(name);
+                        // The leader isn't in `active` (their share is computed
+                        // separately at 1.2x), but they're obviously not a
+                        // passive recipient either — exclude them from both.
+                        out.passive = players
+                            .map((p, idx) => idx)
+                            .filter(idx => idx !== e.leader && !(e.active || []).includes(idx))
+                            .map(name);
+                        out.shares = mapKeysToNames(e.shares);
+                        break;
+                    }
+                    case 'settlement':
+                        out.wentOut = (e.wentOut !== null && e.wentOut !== undefined) ? name(e.wentOut) : null;
+                        out.handPoints = mapKeysToNames(e.handPoints);
+                        break;
+                }
+                return out;
+            });
+
+            return JSON.stringify({
+                gameId: `${new Date(entry.date).toISOString().slice(0, 10)}-${entry.date}`,
+                date: new Date(entry.date).toISOString(),
+                mode: gameMode,
+                rounds: entry.rounds,
+                durationMs: entry.durationMs,
+                players: players.map(p => p.name),
+                finalScores: entry.players.reduce((acc, p) => { acc[p.name] = p.total; return acc; }, {}),
+                highestTurn: highestTurn ? { player: name(highestTurn.playerIdx), value: highestTurn.value } : null,
+                highestWord: highestWord ? { player: name(highestWord.playerIdx), value: highestWord.value } : null,
+                events
+            });
         }
 
         function loadGoogleQueue() {
@@ -4508,7 +4779,12 @@
         // payload included. If it's the only thing pending and network is up,
         // it clears right away with no visible delay to the scorekeeper.
         function queueGoogleFormSubmission(entry, highestTurn, highestWord) {
-            const payload = buildGoogleFormPayload(entry, highestTurn, highestWord);
+            // Built here (not at send time) because it reads live game state,
+            // which is gone by the time a queued item is retried after being
+            // offline.
+            const gameLogJson = buildGameLogJson(entry, highestTurn, highestWord);
+            try { localStorage.setItem(LAST_GAMELOG_KEY, gameLogJson); } catch (e) { /* ignore */ }
+            const payload = buildGoogleFormPayload(entry, highestTurn, highestWord, gameLogJson);
             const queue = loadGoogleQueue();
             queue.push(payload);
             while (queue.length > GOOGLE_QUEUE_MAX) queue.shift(); // drop the oldest if it's grown huge
@@ -4555,8 +4831,11 @@
         // just left open and idle rather than reopened.
         window.addEventListener('online', flushGoogleFormQueue);
 
-        function renderGameHistoryList() {
-            const listEl = document.getElementById('game-history-list');
+        // `suffix` lets the same panel exist on both the Setup and Results
+        // screens without duplicate element ids ('' = Results, '-setup' = Setup).
+        function renderGameHistoryList(suffix) {
+            const listEl = document.getElementById('game-history-list' + (suffix || ''));
+            if (!listEl) return;
             const history = loadGameHistory();
             const records = loadAllTimeRecords();
 
@@ -4591,18 +4870,39 @@
             listEl.innerHTML = recordsHtml + gamesHtml;
         }
 
-        function toggleGameHistory() {
-            const box = document.getElementById('game-history-container');
-            const toggle = document.getElementById('game-history-toggle');
+        function toggleGameHistory(suffix) {
+            const sfx = suffix || '';
+            const box = document.getElementById('game-history-container' + sfx);
+            const toggle = document.getElementById('game-history-toggle' + sfx);
             const isOpen = box.style.display === 'block';
-            if (!isOpen) renderGameHistoryList();
+            if (!isOpen) renderGameHistoryList(sfx);
             box.style.display = isOpen ? 'none' : 'block';
             toggle.textContent = isOpen ? '▼ Show' : '▲ Hide';
         }
 
+        // Escape hatch for reading the log without going through the
+        // spreadsheet — useful for spot-checking a game right after playing it.
+        const LAST_GAMELOG_KEY = 'crosswayz_last_gamelog_v1';
+        function copyLastGameLog() {
+            let json = '';
+            try { json = localStorage.getItem(LAST_GAMELOG_KEY) || ''; } catch (e) { /* ignore */ }
+            if (!json) {
+                showToast('No game log saved yet');
+                return;
+            }
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(json)
+                    .then(() => showToast('Game log copied to clipboard'))
+                    .catch(() => showToast('Copy failed — check clipboard permissions'));
+            } else {
+                showToast('Clipboard not available on this browser');
+            }
+        }
+
         function clearGameHistory() {
             saveGameHistory([]);
-            renderGameHistoryList();
+            renderGameHistoryList('');
+            renderGameHistoryList('-setup');
             showToast('Game history cleared');
         }
 
