@@ -1,7 +1,7 @@
 // CrossWayz offline support.
 // Bump CACHE_NAME any time index.html changes so returning visitors get the
 // new version instead of a stale cached copy.
-const CACHE_NAME = 'crosswayz-cache-v18';
+const CACHE_NAME = 'crosswayz-cache-v19';
 const FILES_TO_CACHE = [
   './',
   './index.html',

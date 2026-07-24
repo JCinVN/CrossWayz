@@ -1202,6 +1202,29 @@
             color: #f87171;
         }
         /* Settlement screen */
+        .settlement-player-block {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 10px;
+            margin-bottom: 8px;
+        }
+        .settlement-player-name {
+            font-weight: 700;
+            font-size: 0.9rem;
+            margin-bottom: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .settlement-player-total {
+            color: var(--danger);
+            font-weight: 700;
+        }
+        .settlement-cat-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            flex: 1;
+        }
         .settlement-radio-row, .settlement-adjust-row {
             display: flex;
             align-items: center;
@@ -1455,6 +1478,14 @@
             <button class="btn btn-secondary" onclick="chooseSevenCardOption('none')">None</button>
         </div>
     </div>
+    <div id="abandon-modal" class="modal-overlay" style="display:none;">
+        <div class="modal-box">
+            <div class="modal-title">⚠️ Abandon This Game?</div>
+            <div class="modal-sub">Everything played so far is discarded. Nothing is saved to Past Games and nothing is uploaded — use this for misdeals or false starts.</div>
+            <button class="btn btn-danger" onclick="confirmAbandonGame()">Yes, Abandon</button>
+            <button class="btn btn-secondary" onclick="closeAbandonModal()">Keep Playing</button>
+        </div>
+    </div>
     <div id="round-limit-modal" class="modal-overlay" style="display:none;">
         <div class="modal-box">
             <div class="modal-title">⏰ Round Limit Reached</div>
@@ -1466,7 +1497,7 @@
     <button id="help-fab" onclick="showHelp()" title="Help">?</button>
     <header>
         <h1>CrossWayz</h1>
-        <div style="text-align:center; color:var(--text-muted); font-size:0.7rem; margin-top:-6px; letter-spacing:1px;">v18</div>
+        <div style="text-align:center; color:var(--text-muted); font-size:0.7rem; margin-top:-6px; letter-spacing:1px;">v19</div>
     </header>
 
     <div class="container">
@@ -1566,7 +1597,11 @@
                     </div>
                     <div style="font-size:0.72rem; color:var(--text-muted); margin-top:6px;">Optional: fill in the small "#" box next to a score with its letter count — used to auto-detect Long Word below.</div>
                     <div id="extra-preset-list" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>
-                    <button class="btn btn-secondary" style="width:auto; padding:8px 14px; font-size:0.8rem; margin-top:10px;" onclick="resetPresetScores()">Reset to Default</button>
+                    <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;">
+                        <button class="btn btn-secondary" style="width:auto; padding:8px 14px; font-size:0.8rem;" onclick="saveMyDefaults()">★ Save as My Default</button>
+                        <button class="btn btn-secondary" style="width:auto; padding:8px 14px; font-size:0.8rem;" onclick="resetPresetScores()">Reset to Default</button>
+                    </div>
+                    <div id="my-default-status" style="font-size:0.72rem; color:var(--text-muted); margin-top:6px;"></div>
 
                     <div style="margin-top:16px;">
                         <label>Long Word Auto-Detect (letters)</label>
@@ -1749,7 +1784,6 @@
                         <div class="control-grid" style="grid-template-columns: repeat(6, 1fr); gap: 6px;">
                             <button id="btn-bonus-2x" class="btn-mult" style="font-size:0.9rem;" onclick="chooseBonusOp('2x')">2X</button>
                             <button id="btn-bonus-3x" class="btn-mult" style="font-size:0.9rem;" onclick="chooseBonusOp('3x')">3X</button>
-                            <button id="btn-bonus-4x" class="btn-mult" style="font-size:0.9rem;" onclick="chooseBonusOp('4x')">4X</button>
                             <button id="btn-bonus-tax" class="btn-mult tax" style="font-size:0.8rem;" onclick="chooseBonusOp('tax')">TAX</button>
                             <button id="btn-bonus-fixed" class="btn-mult" style="font-size:0.75rem;" onclick="chooseBonusOp('fixed')">FLAT</button>
                             <button id="btn-bonus-stack" class="btn-mult" style="font-size:0.7rem;" onclick="chooseBonusOp('stack')">STACK</button>
@@ -1776,8 +1810,9 @@
             </div>
 
             <!-- End game (tap twice to confirm -> goes to settlement) -->
-            <div class="reset-container">
+            <div class="reset-container" style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
                 <button id="reset-btn" class="btn btn-danger btn-sm" onclick="resetGame(this)">End Game</button>
+                <button class="btn btn-secondary btn-sm" onclick="showAbandonModal()">Abandon Game</button>
             </div>
 
             <!-- 5. Full round-by-round detail (bottom of page) -->
@@ -1800,11 +1835,19 @@
                 </div>
 
                 <div class="form-group">
-                    <label>Hand Points (Remaining Cards, Action Token, Bonus Token)</label>
+                    <label>Hand Points</label>
                     <div class="hand-calc-panel">
                         <div class="challenge-target-row">
                             <span>Add for:</span>
                             <select id="hand-calc-player-select"></select>
+                        </div>
+                        <div class="challenge-target-row">
+                            <span>Type:</span>
+                            <select id="hand-calc-category-select" onchange="renderHandCalcGrid()">
+                                <option value="cards">Letter Cards</option>
+                                <option value="action">Action Tokens</option>
+                                <option value="bonus">Bonus Tokens</option>
+                            </select>
                         </div>
                         <div class="control-grid" id="hand-calc-grid"></div>
                         <div class="staged-row">
@@ -1936,13 +1979,13 @@
                     </div>
 
                     <div class="help-section">
-                        <h3>Bonus (2X / 3X / 4X / TAX / FLAT)</h3>
+                        <h3>Bonus (2X / 3X / TAX / FLAT)</h3>
                         <p>After building your Words, pick a Bonus and where it applies: <strong>Letter</strong> (choose a card, self-explanatory value), <strong>Word</strong> (auto-picks your highest word for a multiplier, or lowest word for TAX), or <strong>Turn</strong> (applies to the whole turn total so far). Multipliers add the extra copies; TAX subtracts that amount; <strong>FLAT</strong> just adds a flat amount unrelated to any Letter/Word/Turn value. One Bonus per turn.</p>
                     </div>
 
                     <div class="help-section">
                         <h3>Perfect Turn (+50)</h3>
-                        <p>A flat bonus you can trigger once per turn, stacking on top of any 2X/3X/4X/TAX/FLAT you also used. It also triggers <strong>automatically</strong> the moment a single Word is built from exactly 7 cards (the whole hand at once) — no need to press the button yourself in that case. Double-tap the greyed-out button to undo either way.</p>
+                        <p>A flat bonus you can trigger once per turn, stacking on top of any 2X/3X/TAX/FLAT you also used. It also triggers <strong>automatically</strong> the moment a single Word is built from exactly 7 cards (the whole hand at once) — no need to press the button yourself in that case. Double-tap the greyed-out button to undo either way.</p>
                     </div>
 
                     <div class="help-section">
@@ -1999,6 +2042,40 @@
     </div>
 
     <script>
+        /* ==========================================================
+           GAME DEFAULTS — safe to edit by hand.
+
+           These are the "factory" values every fresh install starts
+           with, and what Setup's "Reset to Default" falls back to if
+           no personal default has been saved on this device.
+
+           Edit the numbers here and re-upload index.html to change
+           what NEW devices get. Devices already in use keep their own
+           saved settings unless they hit Reset.
+           ========================================================== */
+
+        // Card scores shown as quick-tap buttons, and how many letters
+        // each score represents (used to auto-detect Long Word).
+        const factoryDefaultPresets = [22, 21, 18, 17, 16, 15, 14, 13, 12, 10, 7, 5, 3, 2, 1];
+        const factoryDefaultLetterCounts = {
+            22: 1, 21: 3, 18: 2, 17: 3, 16: 2, 15: 3, 14: 2,
+            13: 1, 12: 2, 10: 2, 7: 1, 5: 1, 3: 1, 2: 1, 1: 1
+        };
+
+        // Letters in one Word at or above this count = Long Word.
+        const factoryDefaultLongWordThreshold = 7;
+
+        // Final Settlement calculators. Letter Cards reuses the card
+        // scores above plus these extras; Action / Bonus Tokens have
+        // their own fixed values.
+        const factoryDefaultHandExtraValues = [25, 30, 35, 40, 50];
+        const factoryDefaultActionTokenValues = [5, 10, 15, 20];
+        const factoryDefaultBonusTokenValues = [5, 10, 15, 20];
+
+        // Names offered in the Setup player dropdowns.
+
+        /* ===== END OF EDITABLE DEFAULTS ===== */
+
         let players = [];
         let activePlayerIndex = 0;
         let currentRound = 1;
@@ -2027,7 +2104,7 @@
         let lookupEntry = null;
         let bonusEntry = null;
         let perfectTurnEntry = null;
-        let bonusPendingOp = null; // '2x' | '3x' | '4x' | 'tax' while choosing a layer
+        let bonusPendingOp = null; // '2x' | '3x' | 'tax' while choosing a layer
         let resetConfirmTimer = null;
 
         let appliedBurn = null; // { targetIdx, round, delta }
@@ -2045,8 +2122,40 @@
         let wagerSessionLog = []; // { id, round(0-idx), confirmed, winnerIdx, deltas: {playerIdx: totalDelta} }
         let currentWagerSession = null; // the in-progress session object (element of wagerSessionLog), or null
 
-        const factoryDefaultPresets = [22, 21, 18, 17, 16, 15, 14, 13, 12, 10, 7, 5, 3, 2, 1];
         const PRESET_STORAGE_KEY = 'crosswayz_presets_v1';
+        // "Save as My Default" snapshot. Reset to Default restores this when
+        // present, so house-rule changes don't need a code edit — only a fresh
+        // install (or Clear My Default) falls back to the factory values above.
+        const MYDEFAULT_STORAGE_KEY = 'crosswayz_my_defaults_v1';
+        function loadMyDefaults() {
+            try {
+                const raw = localStorage.getItem(MYDEFAULT_STORAGE_KEY);
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    if (parsed && Array.isArray(parsed.presets)) return parsed;
+                }
+            } catch (e) { /* ignore */ }
+            return null;
+        }
+        function saveMyDefaults() {
+            const snapshot = {
+                presets: [...presetScores],
+                letterCounts: { ...letterCountMap },
+                longWordThreshold: longWordThreshold
+            };
+            try {
+                localStorage.setItem(MYDEFAULT_STORAGE_KEY, JSON.stringify(snapshot));
+                showToast('Saved as your default');
+            } catch (e) {
+                showToast('Could not save — storage unavailable');
+            }
+            renderExtraPresetList();
+        }
+        function clearMyDefaults() {
+            try { localStorage.removeItem(MYDEFAULT_STORAGE_KEY); } catch (e) { /* ignore */ }
+            showToast('Personal default cleared — now using factory values');
+            renderExtraPresetList();
+        }
         let presetScores = [];
         let gamePresetList = [];
 
@@ -2057,9 +2166,6 @@
         // ignored by auto-detection below. One score = one letter count, no
         // ambiguity, per how the scoring rules are set up.
         const LETTERCOUNT_STORAGE_KEY = 'crosswayz_lettercounts_v1';
-        const factoryDefaultLetterCounts = {
-            22: 1, 21: 3, 18: 2, 17: 3, 16: 2, 15: 3, 14: 2, 13: 1, 12: 2, 10: 2, 7: 1, 5: 1, 3: 1, 2: 1, 1: 1
-        };
         let letterCountMap = loadLetterCountMap();
         function loadLetterCountMap() {
             try {
@@ -2069,7 +2175,8 @@
                     if (parsed && typeof parsed === 'object') return parsed;
                 }
             } catch (e) { /* ignore */ }
-            return { ...factoryDefaultLetterCounts };
+            const mine = loadMyDefaults();
+            return mine ? { ...mine.letterCounts } : { ...factoryDefaultLetterCounts };
         }
         function saveLetterCountMap() {
             try { localStorage.setItem(LETTERCOUNT_STORAGE_KEY, JSON.stringify(letterCountMap)); } catch (e) { /* ignore */ }
@@ -2083,7 +2190,7 @@
                 const n = parseInt(localStorage.getItem(LONGWORD_THRESHOLD_KEY));
                 if (n > 0) return n;
             } catch (e) { /* ignore */ }
-            return 7;
+            return factoryDefaultLongWordThreshold;
         }
         function saveLongWordThreshold() {
             try { localStorage.setItem(LONGWORD_THRESHOLD_KEY, String(longWordThreshold)); } catch (e) { /* ignore */ }
@@ -2459,11 +2566,17 @@
         }
 
         function resetPresetScores() {
-            presetScores = [...factoryDefaultPresets];
-            letterCountMap = { ...factoryDefaultLetterCounts };
+            const mine = loadMyDefaults();
+            presetScores = mine ? [...mine.presets] : [...factoryDefaultPresets];
+            letterCountMap = mine ? { ...mine.letterCounts } : { ...factoryDefaultLetterCounts };
+            longWordThreshold = (mine && mine.longWordThreshold) ? mine.longWordThreshold : factoryDefaultLongWordThreshold;
             savePresetScores();
             saveLetterCountMap();
+            saveLongWordThreshold();
+            const thr = document.getElementById('longword-threshold-input');
+            if (thr) thr.value = longWordThreshold;
             renderExtraPresetList();
+            showToast(mine ? 'Restored your saved default' : 'Restored factory default');
         }
 
         function loadPresetScores() {
@@ -2486,6 +2599,7 @@
         function renderExtraPresetList() {
             const container = document.getElementById('extra-preset-list');
             const sorted = [...presetScores].sort((a, b) => b - a);
+            renderMyDefaultStatus();
             if (sorted.length === 0) {
                 container.innerHTML = '<span style="color:var(--text-muted); font-size:0.8rem;">No preset scores yet — add some above.</span>';
                 return;
@@ -2497,6 +2611,15 @@
                             <span class="remove-x" onclick="removeExtraPreset(${v})">✕</span>
                         </span>`;
             }).join('');
+        }
+
+        function renderMyDefaultStatus() {
+            const el = document.getElementById('my-default-status');
+            if (!el) return;
+            const mine = loadMyDefaults();
+            el.innerHTML = mine
+                ? `Reset restores <strong>your saved default</strong> (${mine.presets.length} scores). <span style="color:var(--primary); cursor:pointer;" onclick="clearMyDefaults()">Clear it</span>`
+                : 'No personal default saved — Reset restores the factory values.';
         }
 
         function setLetterCount(score, val) {
@@ -3253,7 +3376,7 @@
             // 'none' -> no score change, no T-PAIR reason
         }
 
-        // ---------- Bonus (2X/3X/4X apply to Letter/Word/Turn; TAX/FLAT are flat amounts; STACK sums multiple cards) ----------
+        // ---------- Bonus (2X/3X apply to Letter/Word/Turn; TAX/FLAT are flat amounts; STACK sums multiple cards) ----------
         function chooseBonusOp(op) {
             if (specialActionsState.bonus) return;
             bonusPendingOp = op;
@@ -3319,10 +3442,10 @@
             }
         }
 
-        // Formula: 2X/3X/4X ADD (targetValue × multiplier) on top of the
-        // existing value — e.g. 2X adds 2× (final total = 3× the original),
-        // 3X adds 3× (final = 4×), and so on. TAX subtracts the target value.
-        // STACK just adds the already-summed value straight through.
+        // Formula: 2X/3X ADD (multiplier − 1) copies of the target, so the
+        // final total lands on exactly that multiple — 2X on a 30-point Word
+        // adds 30 (total 60), 3X adds 60 (total 90). TAX subtracts the target
+        // value. STACK just adds the already-summed value straight through.
         function applyBonus(op, layerLabel, targetValue) {
             let delta, opLabel;
             if (op === 'tax') {
@@ -3332,7 +3455,7 @@
                 delta = targetValue;
                 opLabel = 'STACK';
             } else {
-                delta = targetValue * parseInt(op);
+                delta = targetValue * (parseInt(op) - 1);
                 opLabel = op.toUpperCase();
             }
             const labelSuffix = layerLabel ? ` ${layerLabel}` : '';
@@ -3422,10 +3545,10 @@
             updateDraftDisplay();
         }
 
-        // Highlights whichever of 2X/3X/4X/TAX/FLAT/STACK is currently
+        // Highlights whichever of 2X/3X/TAX/FLAT/STACK is currently
         // mid-selection, so it's always clear which one you're in the middle of using.
         function updateBonusOpButtonsUI() {
-            ['2x', '3x', '4x', 'tax', 'fixed', 'stack'].forEach(op => {
+            ['2x', '3x', 'tax', 'fixed', 'stack'].forEach(op => {
                 const btn = document.getElementById(`btn-bonus-${op}`);
                 if (btn) btn.classList.toggle('selected', bonusPendingOp === op);
             });
@@ -3649,7 +3772,6 @@
             const perfectBtn = document.getElementById('btn-perfect-turn');
             const bonus2 = document.getElementById('btn-bonus-2x');
             const bonus3 = document.getElementById('btn-bonus-3x');
-            const bonus4 = document.getElementById('btn-bonus-4x');
             const bonusTax = document.getElementById('btn-bonus-tax');
             const bonusFixed = document.getElementById('btn-bonus-fixed');
             const bonusStack = document.getElementById('btn-bonus-stack');
@@ -3659,7 +3781,7 @@
             configureSpecialButton(bBtn, () => specialActionsState.challenge, undoChallenge);
             configureSpecialButton(burnBtn, () => specialActionsState.burn, undoBurn);
             configureSpecialButton(perfectBtn, () => specialActionsState.perfectTurn, undoPerfectTurn);
-            [bonus2, bonus3, bonus4, bonusTax, bonusFixed, bonusStack].forEach(btn => configureSpecialButton(btn, () => specialActionsState.bonus, undoBonus));
+            [bonus2, bonus3, bonusTax, bonusFixed, bonusStack].forEach(btn => configureSpecialButton(btn, () => specialActionsState.bonus, undoBonus));
 
             if (specialActionsState.bonus) hideBonusPickers();
         }
@@ -4067,14 +4189,24 @@
             wentOutContainer.innerHTML = html;
 
             const adjustContainer = document.getElementById('settlement-adjust-list');
+            // Three separate deductions per player rather than one lump sum —
+            // the total is identical, but recording where the points came from
+            // is what makes "who keeps sitting on unused Bonus Tokens?"
+            // answerable after the fact.
             adjustContainer.innerHTML = players.map((p, idx) => `
-                <div class="settlement-adjust-row">
-                    <span>${p.name}</span>
-                    <div class="hand-points-input-wrap">
-                        <span class="minus-prefix">−</span>
-                        <input type="number" id="settlement-adjust-${idx}" value="0" min="0">
-                        <button class="mini-clear-btn" onclick="resetHandPointsInput(${idx})" title="Reset to 0">✕</button>
+                <div class="settlement-player-block">
+                    <div class="settlement-player-name">${p.name}
+                        <span class="settlement-player-total" id="settlement-total-${idx}">−0</span>
                     </div>
+                    ${HAND_CATEGORIES.map(cat => `
+                        <div class="settlement-adjust-row">
+                            <span class="settlement-cat-label">${cat.label}</span>
+                            <div class="hand-points-input-wrap">
+                                <span class="minus-prefix">−</span>
+                                <input type="number" id="settlement-adjust-${idx}-${cat.key}" value="0" min="0" oninput="updateSettlementTotal(${idx})">
+                                <button class="mini-clear-btn" onclick="resetHandPointsInput(${idx}, '${cat.key}')" title="Reset to 0">✕</button>
+                            </div>
+                        </div>`).join('')}
                 </div>`).join('');
 
             renderHandCalc();
@@ -4086,16 +4218,47 @@
 
         // ---------- Hand Points calculator (Settlement screen) ----------
         let handCalcSum = 0;
-        const HAND_QUICK_ADD = [25, 30, 35, 40, 50]; // fixed for now — ask if you'd like these editable later
+        const HAND_CATEGORIES = [
+            { key: 'cards', label: 'Letter Cards' },
+            { key: 'action', label: 'Action Tokens' },
+            { key: 'bonus', label: 'Bonus Tokens' }
+        ];
+
+        // Letter Cards reuses this game's card scores (plus the extras), since
+        // that's literally what's left in hand. Tokens have their own values.
+        function handCalcValuesFor(category) {
+            if (category === 'action') return [...factoryDefaultActionTokenValues].sort((a, b) => b - a);
+            if (category === 'bonus') return [...factoryDefaultBonusTokenValues].sort((a, b) => b - a);
+            return [...new Set([...gamePresetList, ...factoryDefaultHandExtraValues])].sort((a, b) => b - a);
+        }
 
         function renderHandCalc() {
             const select = document.getElementById('hand-calc-player-select');
             select.innerHTML = players.map((p, idx) => `<option value="${idx}">${p.name}</option>`).join('');
+            document.getElementById('hand-calc-category-select').value = 'cards';
+            renderHandCalcGrid();
+            players.forEach((p, idx) => updateSettlementTotal(idx));
+        }
+
+        function renderHandCalcGrid() {
+            const category = document.getElementById('hand-calc-category-select').value;
             const grid = document.getElementById('hand-calc-grid');
-            const combined = [...new Set([...gamePresetList, ...HAND_QUICK_ADD])].sort((a, b) => b - a);
-            grid.innerHTML = combined.map(v => `<button class="btn-quick-tax" onclick="tapHandCalc(${v})">${v}</button>`).join('');
+            grid.innerHTML = handCalcValuesFor(category)
+                .map(v => `<button class="btn-quick-tax" onclick="tapHandCalc(${v})">${v}</button>`).join('');
             handCalcSum = 0;
             document.getElementById('hand-calc-subtotal').textContent = '0';
+        }
+
+        function updateSettlementTotal(idx) {
+            const el = document.getElementById(`settlement-total-${idx}`);
+            if (el) el.textContent = '−' + handPointsTotalFor(idx);
+        }
+
+        function handPointsTotalFor(idx) {
+            return HAND_CATEGORIES.reduce(function (sum, cat) {
+                const input = document.getElementById(`settlement-adjust-${idx}-${cat.key}`);
+                return sum + Math.abs(parseInt(input && input.value) || 0);
+            }, 0);
         }
 
         function tapHandCalc(val) {
@@ -4107,8 +4270,10 @@
         function applyHandCalc() {
             if (handCalcSum === 0) return;
             const idx = parseInt(document.getElementById('hand-calc-player-select').value);
-            const input = document.getElementById(`settlement-adjust-${idx}`);
+            const category = document.getElementById('hand-calc-category-select').value;
+            const input = document.getElementById(`settlement-adjust-${idx}-${category}`);
             input.value = Math.max(0, (parseInt(input.value) || 0) + handCalcSum);
+            updateSettlementTotal(idx);
             handCalcSum = 0;
             document.getElementById('hand-calc-subtotal').textContent = '0';
         }
@@ -4118,9 +4283,10 @@
             document.getElementById('hand-calc-subtotal').textContent = '0';
         }
 
-        function resetHandPointsInput(idx) {
-            const input = document.getElementById(`settlement-adjust-${idx}`);
+        function resetHandPointsInput(idx, category) {
+            const input = document.getElementById(`settlement-adjust-${idx}-${category}`);
             if (input) input.value = 0;
+            updateSettlementTotal(idx);
         }
 
         function cancelSettlement() {
@@ -4425,10 +4591,14 @@
             const settlementRoundIndex = getMaxRoundCount();
 
             players.forEach((p, idx) => {
-                const adjustInput = document.getElementById(`settlement-adjust-${idx}`);
-                // Hand points are always a penalty — the field only takes the
+                // Hand points are always a penalty — the fields only take the
                 // magnitude typed in, no need to type a minus sign.
-                const handPoints = Math.abs(parseInt(adjustInput.value) || 0);
+                const breakdown = {};
+                HAND_CATEGORIES.forEach(cat => {
+                    const input = document.getElementById(`settlement-adjust-${idx}-${cat.key}`);
+                    breakdown[cat.key] = Math.abs(parseInt(input && input.value) || 0);
+                });
+                const handPoints = breakdown.cards + breakdown.action + breakdown.bonus;
                 let adjustVal = -handPoints;
                 if (idx === wentOutIdx) adjustVal += 25;
                 p.turnScore[settlementRoundIndex] = (p.turnScore[settlementRoundIndex] || 0) + adjustVal;
@@ -4436,6 +4606,7 @@
                 // Details "🏁 Settlement" row can show "25 − 12" instead of a
                 // single merged "+13" figure.
                 p.settlementHandPoints = handPoints;
+                p.settlementBreakdown = breakdown;
             });
             recalculateTotals();
 
@@ -4451,7 +4622,13 @@
                 t: 'settlement',
                 wentOut: wentOutIdx >= 0 ? wentOutIdx : null,
                 handPoints: players.reduce((acc, p, idx) => {
-                    acc[idx] = -(p.settlementHandPoints || 0);
+                    const b = p.settlementBreakdown || { cards: 0, action: 0, bonus: 0 };
+                    acc[idx] = {
+                        cards: -b.cards,
+                        action: -b.action,
+                        bonus: -b.bonus,
+                        total: -(p.settlementHandPoints || 0)
+                    };
                     return acc;
                 }, {})
             };
@@ -4563,6 +4740,32 @@
                 html += `<div>✨ Perfect Turn: <strong>${summary}</strong></div>`;
             }
             return html;
+        }
+
+        function showAbandonModal() {
+            pauseTimer();
+            document.getElementById('abandon-modal').style.display = 'flex';
+        }
+
+        function closeAbandonModal() {
+            document.getElementById('abandon-modal').style.display = 'none';
+            resumeTimer();
+        }
+
+        // Drops the game without recording or uploading it — the point is to
+        // keep misdeals and false starts out of the analysis data.
+        function confirmAbandonGame() {
+            document.getElementById('abandon-modal').style.display = 'none';
+            clearSavedState();
+            stopElapsedTimeDisplay();
+            stopTurnTimer();
+            document.body.classList.remove('mode-quick', 'mode-lite');
+            document.getElementById('game-screen').style.display = 'none';
+            document.getElementById('settlement-screen').style.display = 'none';
+            document.getElementById('results-screen').style.display = 'none';
+            document.getElementById('setup-screen').style.display = 'block';
+            scrollToTop();
+            showToast('Game abandoned — nothing recorded');
         }
 
         function startNewGameFromResults() {
